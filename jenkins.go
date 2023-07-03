@@ -11,6 +11,9 @@ import(
 	"encoding/json"
 	"github.com/integrii/flaggy"
 	"gopkg.in/vansante/go-dl-stream.v2"
+	"golang.org/x/text/message"
+	"golang.org/x/text/number"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -36,7 +39,9 @@ type Artifact struct {
 }
 
 type StatusWriter struct {
-	total int64
+	p      *message.Printer
+	format number.FormatFunc
+	total  int64
 }
 
 var (
@@ -126,6 +131,7 @@ func newDownloadCmd() *Cmd {
 	build := ""
 	artifactFilter := ""
 	dstdir := ""
+	replace := false
 
 	get := flaggy.NewSubcommand("download")
 	get.Description = "download build artifact"
@@ -133,6 +139,7 @@ func newDownloadCmd() *Cmd {
 	get.String(&build, "b", "build", "[optional] Build to fetch (defaults to latest)")
 	get.String(&artifactFilter, "a", "artifact", "[optional] regex specifying which artifacts to fetch (default all)")
 	get.String(&dstdir, "d", "dstdir", "[optional] Destination directory to download artifact(s) into")
+	get.Bool(&replace, "r", "replace", "[optional] replace artifacts if they already exist")
 
 	handler := func(cmd *Cmd) error {
 		build = parseBuild(build)
@@ -166,7 +173,7 @@ func newDownloadCmd() *Cmd {
 
 		for  _, artifact := range metadata.Artifacts {
 			if artifactRe.MatchString(artifact.DisplayPath) {
-				err = download(build, artifact, dstdir)
+				err = download(build, artifact, dstdir, replace)
 				if err != nil {
 					return err
 				}
@@ -179,19 +186,44 @@ func newDownloadCmd() *Cmd {
 	return &Cmd{cmd: get, handler: handler}
 }
 
-func download(build string, artifact *Artifact, dstdir string) error {
+func download(build string, artifact *Artifact, dstdir string, replace bool) error {
 	src := fmt.Sprintf("%s/%s/artifact/%s", serverURL.String(), build, artifact.RelativePath)
 	dst := fmt.Sprintf("%s/%s", dstdir, artifact.Filename)
 
-	fmt.Printf("downloading %s to %s\n", src, dst)
-	sw := &StatusWriter{}
+	_, err := os.Stat(dst)
+	if err == nil {
+		if !replace {
+			return fmt.Errorf("%s: already exists and -replace not specified")
+		}
 
-	err := dlstream.DownloadStream(context.Background(), src, dst, sw)
+		err = os.Remove(dst)
+		if err != nil {
+			return fmt.Errorf("remove %s: %v", dst, err)
+		}
+	} else {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %v", dst, err)
+		}
+	}
+
+	fmt.Printf("downloading %s to %s\n", src, dst)
+
+//	o := number.Option{}
+//	o.MaxFractionDigits(2)
+//	o.MinFractionDigits(2)
+
+	sw := &StatusWriter{
+		p:      message.NewPrinter(language.English),
+		format: number.NewFormat(number.Decimal, number.MaxFractionDigits(2), number.MinFractionDigits(2)),
+		total: 0,
+	}
+
+	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("\nDownloaded %s (%d bytes)\n", artifact.Filename, sw.total)
+	sw.p.Printf("\nDownloaded %s (%v bytes)\n", artifact.Filename, number.Decimal(sw.total))
 
 	return nil
 }
@@ -233,7 +265,9 @@ func parseBuild(build string) string {
 
 func (sw *StatusWriter) Write(data []byte) (int, error) {
 	sw.total += int64(len(data))
-	fmt.Fprint(os.Stdout, "%s%s%d", EraseLine, SOL, sw.total)
+
+	v := float64(sw.total) / 1000.0
+	sw.p.Fprintf(os.Stdout, "%s%sDownloaded %v KB", EraseLine, SOL, sw.format(v))
 	os.Stdout.Sync()
 
 	return len(data), nil
