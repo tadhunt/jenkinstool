@@ -30,6 +30,7 @@ type Cmd struct {
 
 type BuildMetadata struct {
 	ID        *string     `json:"id"`
+	Result    *string     `json:"result"`
 	Artifacts []*Artifact `json:"artifacts"`
 }
 
@@ -50,6 +51,7 @@ type StatusWriter struct {
 
 var (
 	serverURL *url.URL
+	quiet = false
 )
 
 func main() {
@@ -61,6 +63,7 @@ func main() {
 
 	server := ""
 	flaggy.String(&server, "s", "server", "[required] URL of Jenkins server to interact with")
+	flaggy.Bool(&quiet, "q", "quiet", "[optional] don't print extra info")
 
 	cmds := []*Cmd{
 		newGetCmd(),
@@ -100,29 +103,47 @@ func main() {
 
 func newGetCmd() *Cmd {
 	build := ""
+	rawJson := false
 
 	get := flaggy.NewSubcommand("get")
-	get.Description = "Get Build Info"
+	get.Description = "Get Build Metadata"
 
 	get.String(&build, "b", "build", "[optional] Build to fetch (defaults to latest)")
+	get.Bool(&rawJson, "j", "json", "[optional] dump all of the json metadata")
 
 	handler := func(cmd *Cmd) error {
 		build = parseBuild(build)
-		metadata, err := getBuildMetadata(build)
-		if err != nil {
-			return err
-		}
+		if rawJson {
+			metadata := ""
+			err := getBuildMetadata(build, &metadata)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s\n", metadata)
+		} else {
+			metadata := &BuildMetadata{}
+			err := getBuildMetadata(build, metadata)
+			if err != nil {
+				return err
+			}
 
-		id := "<unknown>"
-		if metadata.ID != nil {
-			id = *metadata.ID
-		}
+			id := "<unknown>"
+			if metadata.ID != nil {
+				id = *metadata.ID
+			}
 
-		fmt.Printf("Build    %s\n", build)
-		fmt.Printf("ID       %v\n", id)
+			result := "<unknown>"
+			if metadata.Result != nil {
+				result = *metadata.Result
+			}
 
-		for _, artifact := range metadata.Artifacts {
-			fmt.Printf("Artifact %s\n", artifact.DisplayPath)
+			fmt.Printf("Build    %s\n", build)
+			fmt.Printf("ID       %v\n", id)
+			fmt.Printf("Result   %v\n", result)
+
+			for _, artifact := range metadata.Artifacts {
+				fmt.Printf("Artifact %s\n", artifact.DisplayPath)
+			}
 		}
 
 		return nil
@@ -170,7 +191,8 @@ func newDownloadCmd() *Cmd {
 			return fmt.Errorf("%s: is not a directory", dstdir)
 		}
 
-		metadata, err := getBuildMetadata(build)
+		metadata := &BuildMetadata{}
+		err = getBuildMetadata(build, metadata)
 		if err != nil {
 			return err
 		}
@@ -232,28 +254,34 @@ func download(build string, artifact *Artifact, dstdir string, replace bool) err
 	return nil
 }
 
-func getBuildMetadata(build string) (*BuildMetadata, error) {
+func getBuildMetadata(build string, metadata any) error {
 	u := fmt.Sprintf("%s/%s/api/json", serverURL.String(), build)
 
-	fmt.Printf("GET %s\n", u)
+	if !quiet {
+		fmt.Printf("GET %s\n", u)
+	}
 
 	response, err := http.Get(u)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	md := &BuildMetadata{}
-	err = json.Unmarshal(body, &md)
-	if err != nil {
-		return nil, err
+	s, isString := metadata.(*string)
+	if isString {
+		*s = string(body)
+	} else {
+		err = json.Unmarshal(body, metadata)
+		if err != nil {
+			return err
+		}
 	}
 
-	return md, nil
+	return nil
 }
 
 func parseBuild(build string) string {
@@ -270,13 +298,15 @@ func parseBuild(build string) string {
 func (sw *StatusWriter) Write(data []byte) (int, error) {
 	sw.total += int64(len(data))
 
-	if sw.total - sw.last >= 256*1000 {
-		kb := float64(sw.total) / 1000.0
-		elapsed := time.Now().Sub(sw.start)
-		kbps := kb / elapsed.Seconds()
-		sw.p.Fprintf(os.Stdout, "%s%sDownloading %s %v KB (%v KB/s)", EraseLine, SOL, sw.name, sw.format(kb), sw.format(kbps))
-		os.Stdout.Sync()
-		sw.last = sw.total
+	if !quiet {
+		if sw.total - sw.last >= 256*1000 {
+			kb := float64(sw.total) / 1000.0
+			elapsed := time.Now().Sub(sw.start)
+			kbps := kb / elapsed.Seconds()
+			sw.p.Fprintf(os.Stdout, "%s%sDownloading %s %v KB (%v KB/s)", EraseLine, SOL, sw.name, sw.format(kb), sw.format(kbps))
+			os.Stdout.Sync()
+			sw.last = sw.total
+		}
 	}
 
 	return len(data), nil
