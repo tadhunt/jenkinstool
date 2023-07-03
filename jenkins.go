@@ -54,7 +54,7 @@ var (
 
 func main() {
 
-	flaggy.SetName("Jenkins CLI Tool")
+	flaggy.SetName(os.Args[0])
 	flaggy.SetDescription("Tool for interacting with the Jenkins API")
 	flaggy.DefaultParser.AdditionalHelpPrepend = "https://github.com/tadhunt/jenkinstool"
 	flaggy.SetVersion("0.1")
