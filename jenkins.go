@@ -82,8 +82,9 @@ func main() {
 			err := cmd.handler(cmd)
 			if err != nil {
 				flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("cmd %s: %v", cmd.cmd.Name, err))
-				return
 			}
+			return
+			
 		}
 	}
 }
