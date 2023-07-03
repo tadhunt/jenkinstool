@@ -8,6 +8,7 @@ import(
 	"io"
 	"net/url"
 	"net/http"
+	"time"
 	"encoding/json"
 	"github.com/integrii/flaggy"
 	"gopkg.in/vansante/go-dl-stream.v2"
@@ -41,7 +42,10 @@ type Artifact struct {
 type StatusWriter struct {
 	p      *message.Printer
 	format number.FormatFunc
+	last   int64
 	total  int64
+	start  time.Time
+	name   string
 }
 
 var (
@@ -206,16 +210,13 @@ func download(build string, artifact *Artifact, dstdir string, replace bool) err
 		}
 	}
 
-	fmt.Printf("downloading %s to %s\n", src, dst)
-
-//	o := number.Option{}
-//	o.MaxFractionDigits(2)
-//	o.MinFractionDigits(2)
-
 	sw := &StatusWriter{
 		p:      message.NewPrinter(language.English),
 		format: number.NewFormat(number.Decimal, number.MaxFractionDigits(2), number.MinFractionDigits(2)),
+		last: 0,
 		total: 0,
+		start: time.Now(),
+		name: dst,
 	}
 
 	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
@@ -223,7 +224,10 @@ func download(build string, artifact *Artifact, dstdir string, replace bool) err
 		return err
 	}
 
-	sw.p.Printf("\nDownloaded %s (%v bytes)\n", artifact.Filename, number.Decimal(sw.total))
+	elapsed := time.Now().Sub(sw.start)
+	kbps := float64(sw.total) / 1000.0 / elapsed.Seconds()
+
+	sw.p.Printf("%s%sDownloaded %s %v bytes (%v KB/s)\n", EraseLine, SOL, dst, number.Decimal(sw.total), sw.format(kbps))
 
 	return nil
 }
@@ -266,9 +270,14 @@ func parseBuild(build string) string {
 func (sw *StatusWriter) Write(data []byte) (int, error) {
 	sw.total += int64(len(data))
 
-	v := float64(sw.total) / 1000.0
-	sw.p.Fprintf(os.Stdout, "%s%sDownloaded %v KB", EraseLine, SOL, sw.format(v))
-	os.Stdout.Sync()
+	if sw.total - sw.last >= 256*1000 {
+		kb := float64(sw.total) / 1000.0
+		elapsed := time.Now().Sub(sw.start)
+		kbps := kb / elapsed.Seconds()
+		sw.p.Fprintf(os.Stdout, "%s%sDownloading %s %v KB (%v KB/s)", EraseLine, SOL, sw.name, sw.format(kb), sw.format(kbps))
+		os.Stdout.Sync()
+		sw.last = sw.total
+	}
 
 	return len(data), nil
 }
