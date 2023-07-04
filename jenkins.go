@@ -1,20 +1,20 @@
 package main
 
-import(
-	"fmt"
+import (
 	"context"
-	"regexp"
-	"os"
-	"io"
-	"net/url"
-	"net/http"
-	"time"
 	"encoding/json"
+	"fmt"
 	"github.com/integrii/flaggy"
-	"gopkg.in/vansante/go-dl-stream.v2"
+	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"golang.org/x/text/number"
-	"golang.org/x/text/language"
+	"gopkg.in/vansante/go-dl-stream.v2"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"regexp"
+	"time"
 )
 
 const (
@@ -35,9 +35,9 @@ type BuildMetadata struct {
 }
 
 type Artifact struct {
-      DisplayPath  string `json:"displayPath"`
-      Filename     string `json:"fileName"`
-      RelativePath string `json:"relativePath"`
+	DisplayPath  string `json:"displayPath"`
+	Filename     string `json:"fileName"`
+	RelativePath string `json:"relativePath"`
 }
 
 type StatusWriter struct {
@@ -51,7 +51,7 @@ type StatusWriter struct {
 
 var (
 	serverURL *url.URL
-	quiet = false
+	quiet     = false
 )
 
 func main() {
@@ -76,7 +76,7 @@ func main() {
 
 	flaggy.Parse()
 
-	if (server == "") {
+	if server == "" {
 		flaggy.DefaultParser.ShowHelpWithMessage("-server is required")
 		return
 	}
@@ -88,7 +88,6 @@ func main() {
 		return
 	}
 
-
 	for _, cmd := range cmds {
 		if cmd.cmd.Used {
 			err := cmd.handler(cmd)
@@ -96,7 +95,7 @@ func main() {
 				flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("cmd %s: %v", cmd.cmd.Name, err))
 			}
 			return
-			
+
 		}
 	}
 }
@@ -181,7 +180,6 @@ func newDownloadCmd() *Cmd {
 		if dstdir == "" {
 			dstdir = "."
 		}
-		
 
 		st, err := os.Stat(dstdir)
 		if os.Stat(dstdir); err != nil {
@@ -197,7 +195,7 @@ func newDownloadCmd() *Cmd {
 			return err
 		}
 
-		for  _, artifact := range metadata.Artifacts {
+		for _, artifact := range metadata.Artifacts {
 			if artifactRe.MatchString(artifact.DisplayPath) {
 				err = download(build, artifact, dstdir, replace)
 				if err != nil {
@@ -235,10 +233,10 @@ func download(build string, artifact *Artifact, dstdir string, replace bool) err
 	sw := &StatusWriter{
 		p:      message.NewPrinter(language.English),
 		format: number.NewFormat(number.Decimal, number.MaxFractionDigits(2), number.MinFractionDigits(2)),
-		last: 0,
-		total: 0,
-		start: time.Now(),
-		name: dst,
+		last:   0,
+		total:  0,
+		start:  time.Now(),
+		name:   dst,
 	}
 
 	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
@@ -299,7 +297,7 @@ func (sw *StatusWriter) Write(data []byte) (int, error) {
 	sw.total += int64(len(data))
 
 	if !quiet {
-		if sw.total - sw.last >= 256*1000 {
+		if sw.total-sw.last >= 256*1000 {
 			kb := float64(sw.total) / 1000.0
 			elapsed := time.Now().Sub(sw.start)
 			kbps := kb / elapsed.Seconds()
