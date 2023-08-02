@@ -1,6 +1,7 @@
 all:
 	go mod tidy
-	go build -o jenkins
+	go test ./...
+	cd cmd && make
 
 install: all
-	cp jenkins ${HOME}/bin
+	cd cmd && make install

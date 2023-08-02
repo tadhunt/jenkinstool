@@ -1,10 +1,9 @@
-package main
+package jenkinstool
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/integrii/flaggy"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"golang.org/x/text/number"
@@ -13,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"time"
 )
 
@@ -22,11 +20,6 @@ const (
 	EraseLine = Esc + "2K"
 	SOL       = "\r"
 )
-
-type Cmd struct {
-	cmd     *flaggy.Subcommand
-	handler func(cmd *Cmd) error
-}
 
 type BuildMetadata struct {
 	ID        *string     `json:"id"`
@@ -40,224 +33,31 @@ type Artifact struct {
 	RelativePath string `json:"relativePath"`
 }
 
-type StatusWriter struct {
-	p      *message.Printer
-	format number.FormatFunc
-	last   int64
-	total  int64
-	start  time.Time
-	name   string
-}
+func GetBuild(src *url.URL, build string) (*BuildMetadata, error) {
+	build = ParseBuild(build)
+	metadata := &BuildMetadata{}
 
-var (
-	serverURL *url.URL
-	quiet     = false
-)
-
-func main() {
-
-	flaggy.SetName(os.Args[0])
-	flaggy.SetDescription("Tool for interacting with the Jenkins API")
-	flaggy.DefaultParser.AdditionalHelpPrepend = "https://github.com/tadhunt/jenkinstool"
-	flaggy.SetVersion("0.1")
-
-	server := ""
-	flaggy.String(&server, "s", "server", "[required] URL of Jenkins server to interact with")
-	flaggy.Bool(&quiet, "q", "quiet", "[optional] don't print extra info")
-
-	cmds := []*Cmd{
-		newGetCmd(),
-		newDownloadCmd(),
-	}
-
-	for _, cmd := range cmds {
-		flaggy.AttachSubcommand(cmd.cmd, 1)
-	}
-
-	flaggy.Parse()
-
-	if server == "" {
-		flaggy.DefaultParser.ShowHelpWithMessage("-server is required")
-		return
-	}
-
-	var err error
-	serverURL, err = url.Parse(server)
+	err := GetBuildMetadata(src, build, metadata)
 	if err != nil {
-		flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("parse url: %v", err))
-		return
+		return nil, err
 	}
 
-	for _, cmd := range cmds {
-		if cmd.cmd.Used {
-			err := cmd.handler(cmd)
-			if err != nil {
-				flaggy.DefaultParser.ShowHelpWithMessage(fmt.Sprintf("cmd %s: %v", cmd.cmd.Name, err))
-			}
-			return
+	return metadata, nil
+}
 
-		}
+func ParseBuild(build string) string {
+	switch build {
+	case "":
+		fallthrough
+	case "latest":
+		return "lastSuccessfulBuild"
+	default:
+		return build
 	}
 }
 
-func newGetCmd() *Cmd {
-	build := ""
-	rawJson := false
-
-	get := flaggy.NewSubcommand("get")
-	get.Description = "Get Build Metadata"
-
-	get.String(&build, "b", "build", "[optional] Build to fetch (defaults to latest)")
-	get.Bool(&rawJson, "j", "json", "[optional] dump all of the json metadata")
-
-	handler := func(cmd *Cmd) error {
-		build = parseBuild(build)
-		if rawJson {
-			metadata := ""
-			err := getBuildMetadata(build, &metadata)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%s\n", metadata)
-		} else {
-			metadata := &BuildMetadata{}
-			err := getBuildMetadata(build, metadata)
-			if err != nil {
-				return err
-			}
-
-			id := "<unknown>"
-			if metadata.ID != nil {
-				id = *metadata.ID
-			}
-
-			result := "<unknown>"
-			if metadata.Result != nil {
-				result = *metadata.Result
-			}
-
-			fmt.Printf("Build    %s\n", build)
-			fmt.Printf("ID       %v\n", id)
-			fmt.Printf("Result   %v\n", result)
-
-			for _, artifact := range metadata.Artifacts {
-				fmt.Printf("Artifact %s\n", artifact.DisplayPath)
-			}
-		}
-
-		return nil
-	}
-
-	return &Cmd{cmd: get, handler: handler}
-}
-
-func newDownloadCmd() *Cmd {
-	build := ""
-	artifactFilter := ""
-	dstdir := ""
-	replace := false
-
-	get := flaggy.NewSubcommand("download")
-	get.Description = "download build artifact"
-
-	get.String(&build, "b", "build", "[optional] Build to fetch (defaults to latest)")
-	get.String(&artifactFilter, "a", "artifact", "[optional] regex specifying which artifacts to fetch (default all)")
-	get.String(&dstdir, "d", "dstdir", "[optional] Destination directory to download artifact(s) into")
-	get.Bool(&replace, "r", "replace", "[optional] replace artifacts if they already exist")
-
-	handler := func(cmd *Cmd) error {
-		build = parseBuild(build)
-
-		if artifactFilter == "" {
-			artifactFilter = ".*"
-		}
-
-		artifactRe, err := regexp.Compile(artifactFilter)
-		if err != nil {
-			return err
-		}
-
-		if dstdir == "" {
-			dstdir = "."
-		}
-
-		st, err := os.Stat(dstdir)
-		if os.Stat(dstdir); err != nil {
-			return fmt.Errorf("%s: %v", dstdir, err)
-		}
-		if !st.IsDir() {
-			return fmt.Errorf("%s: is not a directory", dstdir)
-		}
-
-		metadata := &BuildMetadata{}
-		err = getBuildMetadata(build, metadata)
-		if err != nil {
-			return err
-		}
-
-		for _, artifact := range metadata.Artifacts {
-			if artifactRe.MatchString(artifact.DisplayPath) {
-				err = download(build, artifact, dstdir, replace)
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		return nil
-	}
-
-	return &Cmd{cmd: get, handler: handler}
-}
-
-func download(build string, artifact *Artifact, dstdir string, replace bool) error {
-	src := fmt.Sprintf("%s/%s/artifact/%s", serverURL.String(), build, artifact.RelativePath)
-	dst := fmt.Sprintf("%s/%s", dstdir, artifact.Filename)
-
-	_, err := os.Stat(dst)
-	if err == nil {
-		if !replace {
-			return fmt.Errorf("%s: already exists and -replace not specified")
-		}
-
-		err = os.Remove(dst)
-		if err != nil {
-			return fmt.Errorf("remove %s: %v", dst, err)
-		}
-	} else {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("stat %s: %v", dst, err)
-		}
-	}
-
-	sw := &StatusWriter{
-		p:      message.NewPrinter(language.English),
-		format: number.NewFormat(number.Decimal, number.MaxFractionDigits(2), number.MinFractionDigits(2)),
-		last:   0,
-		total:  0,
-		start:  time.Now(),
-		name:   dst,
-	}
-
-	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
-	if err != nil {
-		return err
-	}
-
-	elapsed := time.Now().Sub(sw.start)
-	kbps := float64(sw.total) / 1000.0 / elapsed.Seconds()
-
-	sw.p.Printf("%s%sDownloaded %s %v bytes (%v KB/s)\n", EraseLine, SOL, dst, number.Decimal(sw.total), sw.format(kbps))
-
-	return nil
-}
-
-func getBuildMetadata(build string, metadata any) error {
-	u := fmt.Sprintf("%s/%s/api/json", serverURL.String(), build)
-
-	if !quiet {
-		fmt.Printf("GET %s\n", u)
-	}
+func GetBuildMetadata(src *url.URL, build string, metadata any) error {
+	u := fmt.Sprintf("%s/%s/api/json", src.String(), build)
 
 	response, err := http.Get(u)
 	if err != nil {
@@ -282,21 +82,20 @@ func getBuildMetadata(build string, metadata any) error {
 	return nil
 }
 
-func parseBuild(build string) string {
-	switch build {
-	case "":
-		fallthrough
-	case "latest":
-		return "lastSuccessfulBuild"
-	default:
-		return build
-	}
+type StatusWriter struct {
+	p      *message.Printer
+	format number.FormatFunc
+	last   int64
+	total  int64
+	start  time.Time
+	name   string
+	quiet  bool
 }
 
 func (sw *StatusWriter) Write(data []byte) (int, error) {
 	sw.total += int64(len(data))
 
-	if !quiet {
+	if !sw.quiet {
 		if sw.total-sw.last >= 256*1000 {
 			kb := float64(sw.total) / 1000.0
 			elapsed := time.Now().Sub(sw.start)
@@ -308,4 +107,47 @@ func (sw *StatusWriter) Write(data []byte) (int, error) {
 	}
 
 	return len(data), nil
+}
+
+func Download(serverURL *url.URL, build string, artifact *Artifact, dstdir string, replace bool, quiet bool) error {
+	src := fmt.Sprintf("%s/%s/artifact/%s", serverURL.String(), build, artifact.RelativePath)
+	dst := fmt.Sprintf("%s/%s", dstdir, artifact.Filename)
+
+	_, err := os.Stat(dst)
+	if err == nil {
+		if !replace {
+			return fmt.Errorf("%s: already exists and -replace not specified", dst)
+		}
+
+		err = os.Remove(dst)
+		if err != nil {
+			return fmt.Errorf("remove %s: %v", dst, err)
+		}
+	} else {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %v", dst, err)
+		}
+	}
+
+	sw := &StatusWriter{
+		p:      message.NewPrinter(language.English),
+		format: number.NewFormat(number.Decimal, number.MaxFractionDigits(2), number.MinFractionDigits(2)),
+		last:   0,
+		total:  0,
+		start:  time.Now(),
+		name:   dst,
+		quiet:  quiet,
+	}
+
+	err = dlstream.DownloadStream(context.Background(), src, dst, sw)
+	if err != nil {
+		return err
+	}
+
+	elapsed := time.Now().Sub(sw.start)
+	kbps := float64(sw.total) / 1000.0 / elapsed.Seconds()
+
+	sw.p.Printf("%s%sDownloaded %s %v bytes (%v KB/s)\n", EraseLine, SOL, dst, number.Decimal(sw.total), sw.format(kbps))
+
+	return nil
 }
