@@ -20,6 +20,16 @@ type Artifact struct {
 	RelativePath string `json:"relativePath"`
 }
 
+type MetadataSyntaxError struct {
+	Raw    string
+	msg    string
+	Offset int64
+}
+
+func (e *MetadataSyntaxError) Error() string {
+	return e.msg
+}
+
 func GetBuildMetadata(src *url.URL, build string) (*BuildMetadata, error) {
 	u := fmt.Sprintf("%s/%s/api/json", src.String(), build)
 
@@ -36,6 +46,14 @@ func GetBuildMetadata(src *url.URL, build string) (*BuildMetadata, error) {
 	metadata := &BuildMetadata{}
 	err = json.Unmarshal(body, metadata)
 	if err != nil {
+		serr, isSyntaxError := err.(*json.SyntaxError)
+		if isSyntaxError {
+			return nil, &MetadataSyntaxError{
+				Raw: string(body),
+				msg: fmt.Sprintf("%v (offset %d)", serr, serr.Offset),
+				Offset: serr.Offset,
+			}
+		}
 		return nil, err
 	}
 
