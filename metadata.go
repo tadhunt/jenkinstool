@@ -31,6 +31,8 @@ func (e *MetadataSyntaxError) Error() string {
 }
 
 func GetBuildMetadata(src *url.URL, build string) (*BuildMetadata, error) {
+	build = parseBuild(build)
+
 	u := fmt.Sprintf("%s/%s/api/json", src.String(), build)
 
 	response, err := http.Get(u)
@@ -61,6 +63,8 @@ func GetBuildMetadata(src *url.URL, build string) (*BuildMetadata, error) {
 }
 
 func GetRawBuildMetadata(src *url.URL, build string) (string, error) {
+	build = parseBuild(build)
+
 	u := fmt.Sprintf("%s/%s/api/json", src.String(), build)
 
 	response, err := http.Get(u)

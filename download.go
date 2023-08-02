@@ -13,6 +13,8 @@ import (
 )
 
 func Download(serverURL *url.URL, build string, artifact *Artifact, dstdir string, replace bool, quiet bool) error {
+	build = parseBuild(build)
+
 	src := fmt.Sprintf("%s/%s/artifact/%s", serverURL.String(), build, artifact.RelativePath)
 	dst := fmt.Sprintf("%s/%s", dstdir, artifact.Filename)
 

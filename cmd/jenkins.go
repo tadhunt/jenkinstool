@@ -75,7 +75,6 @@ func newGetCmd() *Cmd {
 	get.Bool(&rawJson, "j", "json", "[optional] dump all of the json metadata")
 
 	handler := func(cmd *Cmd) error {
-		build = jenkinstool.ParseBuild(build)
 		if rawJson {
 			metadata, err := jenkinstool.GetRawBuildMetadata(serverURL, build)
 			if err != nil {
@@ -102,6 +101,7 @@ func newGetCmd() *Cmd {
 
 	return &Cmd{cmd: get, handler: handler}
 }
+
 func newDownloadCmd() *Cmd {
 	build := ""
 	artifactFilter := ""
@@ -117,8 +117,6 @@ func newDownloadCmd() *Cmd {
 	get.Bool(&replace, "r", "replace", "[optional] replace artifacts if they already exist")
 
 	handler := func(cmd *Cmd) error {
-		build = jenkinstool.ParseBuild(build)
-
 		if artifactFilter == "" {
 			artifactFilter = ".*"
 		}

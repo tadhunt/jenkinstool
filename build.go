@@ -4,7 +4,7 @@ const (
 	LatestBuild = "latest"
 )
 
-func ParseBuild(build string) string {
+func parseBuild(build string) string {
 	switch build {
 	case "":
 		fallthrough
