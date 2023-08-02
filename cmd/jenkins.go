@@ -77,21 +77,20 @@ func newGetCmd() *Cmd {
 	handler := func(cmd *Cmd) error {
 		build = jenkinstool.ParseBuild(build)
 		if rawJson {
-			metadata := ""
-			err := jenkinstool.GetBuildMetadata(serverURL, build, &metadata)
+			metadata, err := jenkinstool.GetRawBuildMetadata(serverURL, build)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("%s\n", metadata)
 		} else {
-			metadata, err := jenkinstool.GetBuild(serverURL, build)
+			metadata, err := jenkinstool.GetBuildMetadata(serverURL, build)
 			if err != nil {
 				return err
 			}
 
 			fmt.Printf("Build    %s\n", build)
-			fmt.Printf("ID       %v\n", metadata.ID)
-			fmt.Printf("Result   %v\n", metadata)
+			fmt.Printf("ID       %v\n", jenkinstool.String(metadata.ID))
+			fmt.Printf("Result   %v\n", jenkinstool.String(metadata.Result))
 
 			for _, artifact := range metadata.Artifacts {
 				fmt.Printf("Artifact %s\n", artifact.DisplayPath)
@@ -141,8 +140,7 @@ func newDownloadCmd() *Cmd {
 			return fmt.Errorf("%s: is not a directory", dstdir)
 		}
 
-		metadata := &jenkinstool.BuildMetadata{}
-		err = jenkinstool.GetBuildMetadata(serverURL, build, metadata)
+		metadata, err := jenkinstool.GetBuildMetadata(serverURL, build)
 		if err != nil {
 			return err
 		}
