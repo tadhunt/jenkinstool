@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/integrii/flaggy"
 	"github.com/tadhunt/jenkinstool"
+	"strings"
 	"net/url"
 	"os"
 	"regexp"
@@ -75,17 +76,19 @@ func newGetCmd() *Cmd {
 
 	get.String(&build, "", "build", "[optional] Build to fetch (defaults to latest)")
 	get.Bool(&showChanges, "", "changes", "[optional] show changes")
-	get.String(&build, "", "since", "[optional] Fetch all builds between the latest and this one")
+	get.String(&since, "", "since", "[optional] Fetch all builds between the latest and this one")
 	get.Bool(&rawJson, "", "json", "[optional] dump the raw json metadata")
 
 	handler := func(cmd *Cmd) error {
 		first :=  true
 		var metadata *jenkinstool.BuildMetadata
 		for {
-			if !first {
-				fmt.Printf("----------\n")
-			}
 			if rawJson {
+				if first {
+					fmt.Printf("[\n")
+				} else {
+					fmt.Printf(",\n")
+				}
 				raw, err := jenkinstool.GetRawBuildMetadata(serverURL, build)
 				if err != nil {
 					return err
@@ -98,6 +101,10 @@ func newGetCmd() *Cmd {
 					return err
 				}
 			} else {
+				if !first {
+					fmt.Printf("----------\n")
+				}
+
 				var err error
 				metadata, err = jenkinstool.GetBuildMetadata(serverURL, build)
 				if err != nil {
@@ -114,33 +121,62 @@ func newGetCmd() *Cmd {
 				if showChanges {
 					for _, cs := range metadata.ChangeSets {
 						for _, item := range cs.Items {
-							fmt.Printf("Change %s Comment %s\n", jenkinstool.String(item.Id), jenkinstool.String(item.Comment))
+							fmt.Printf("Change %s\n", jenkinstool.String(item.Id))
+							comment := cleanComment(jenkinstool.String(item.Comment))
+							os.Stdout.WriteString(comment)
 						}
 					}
 				}
 			}
 
 			if since == "" {
-				return nil
+				break
 			}
 
 			if metadata.PreviousBuild == nil {
-				return nil
+				break
 			}
 
 			prevBuild := jenkinstool.String(metadata.PreviousBuild.Number)
 			if prevBuild == "" {
-				return nil
+				break
+			}
+
+			if prevBuild == since {
+				break
 			}
 
 			build = prevBuild
 			first = false
 		}
 
+		if rawJson {
+			fmt.Printf("]\n")
+		}
+
 		return nil
 	}
 
 	return &Cmd{cmd: get, handler: handler}
+}
+
+func cleanComment(comment string) string {
+	if len(comment) == 0 {
+		return comment
+	}
+
+	var i int
+	for i = len(comment)-1; i > 0; i-- {
+		if comment[i] != '\n' {
+			break
+		}
+	}
+
+	comment = comment[:i+1]
+
+	comment = strings.ReplaceAll(comment, "\n", "\n\t")
+
+	return "\t" + comment + "\n"
 }
 
 func newDownloadCmd() *Cmd {
