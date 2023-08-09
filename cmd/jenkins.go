@@ -161,19 +161,7 @@ func newGetCmd() *Cmd {
 }
 
 func cleanComment(comment string) string {
-	if len(comment) == 0 {
-		return comment
-	}
-
-	var i int
-	for i = len(comment)-1; i > 0; i-- {
-		if comment[i] != '\n' {
-			break
-		}
-	}
-
-	comment = comment[:i+1]
-
+	comment = strings.TrimRight(comment, "\n")
 	comment = strings.ReplaceAll(comment, "\n", "\n\t")
 
 	return "\t" + comment + "\n"
