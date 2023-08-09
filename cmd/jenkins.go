@@ -66,34 +66,75 @@ func main() {
 
 func newGetCmd() *Cmd {
 	build := ""
+	since := ""
+	showChanges := false
 	rawJson := false
 
 	get := flaggy.NewSubcommand("get")
 	get.Description = "Get Build Metadata"
 
-	get.String(&build, "b", "build", "[optional] Build to fetch (defaults to latest)")
-	get.Bool(&rawJson, "j", "json", "[optional] dump all of the json metadata")
+	get.String(&build, "", "build", "[optional] Build to fetch (defaults to latest)")
+	get.Bool(&showChanges, "", "changes", "[optional] show changes")
+	get.String(&build, "", "since", "[optional] Fetch all builds between the latest and this one")
+	get.Bool(&rawJson, "", "json", "[optional] dump the raw json metadata")
 
 	handler := func(cmd *Cmd) error {
-		if rawJson {
-			metadata, err := jenkinstool.GetRawBuildMetadata(serverURL, build)
-			if err != nil {
-				return err
+		first :=  true
+		var metadata *jenkinstool.BuildMetadata
+		for {
+			if !first {
+				fmt.Printf("----------\n")
 			}
-			fmt.Printf("%s\n", metadata)
-		} else {
-			metadata, err := jenkinstool.GetBuildMetadata(serverURL, build)
-			if err != nil {
-				return err
+			if rawJson {
+				raw, err := jenkinstool.GetRawBuildMetadata(serverURL, build)
+				if err != nil {
+					return err
+				}
+
+				fmt.Printf("%s\n", raw)
+
+				metadata, err = jenkinstool.GetBuildMetadataFromBytes(raw)
+				if err != nil {
+					return err
+				}
+			} else {
+				var err error
+				metadata, err = jenkinstool.GetBuildMetadata(serverURL, build)
+				if err != nil {
+					return err
+				}
+
+				fmt.Printf("Build    %s\n", build)
+				fmt.Printf("ID       %v\n", jenkinstool.String(metadata.ID))
+				fmt.Printf("Result   %v\n", jenkinstool.String(metadata.Result))
+
+				for _, artifact := range metadata.Artifacts {
+					fmt.Printf("Artifact %s\n", artifact.DisplayPath)
+				}
+				if showChanges {
+					for _, cs := range metadata.ChangeSets {
+						for _, item := range cs.Items {
+							fmt.Printf("Change %s Comment %s\n", jenkinstool.String(item.Id), jenkinstool.String(item.Comment))
+						}
+					}
+				}
 			}
 
-			fmt.Printf("Build    %s\n", build)
-			fmt.Printf("ID       %v\n", jenkinstool.String(metadata.ID))
-			fmt.Printf("Result   %v\n", jenkinstool.String(metadata.Result))
-
-			for _, artifact := range metadata.Artifacts {
-				fmt.Printf("Artifact %s\n", artifact.DisplayPath)
+			if since == "" {
+				return nil
 			}
+
+			if metadata.PreviousBuild == nil {
+				return nil
+			}
+
+			prevBuild := jenkinstool.String(metadata.PreviousBuild.Number)
+			if prevBuild == "" {
+				return nil
+			}
+
+			build = prevBuild
+			first = false
 		}
 
 		return nil

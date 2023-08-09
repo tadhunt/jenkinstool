@@ -1,6 +1,6 @@
 all:
 	go mod tidy
-	go test ./...
+	go test -v ./...
 	cd cmd && make
 
 install: all
